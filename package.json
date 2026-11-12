@@ -1,0 +1,16 @@
+{
+  "name": "clipnest-video-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ClipNest website and authorized direct-video downloader",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0"
+  }
+}

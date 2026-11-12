@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: clipnest
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SAVEAPI_KEY
+        sync: false
