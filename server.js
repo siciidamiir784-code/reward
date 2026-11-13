@@ -65,6 +65,10 @@ const videoExtensions = new Set([
   '.3gp', '.avi', '.flv', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg',
   '.ogv', '.ts', '.webm'
 ]);
+const nonVideoExtensions = new Set([
+  '.avif', '.css', '.gif', '.htm', '.html', '.jpeg', '.jpg', '.js',
+  '.json', '.png', '.svg', '.txt', '.webp', '.xml'
+]);
 const videoMimeByExtension = new Map([
   ['.3gp', 'video/3gpp'], ['.avi', 'video/x-msvideo'], ['.flv', 'video/x-flv'],
   ['.m4v', 'video/mp4'], ['.mkv', 'video/x-matroska'],
@@ -221,11 +225,10 @@ function isVideoResponse(contentType, url, headers = {}) {
     ? path.extname(filename[1].trim().replace(/^"|"$/g, '').split("'").pop()).toLowerCase()
     : '';
   const urlExtension = path.extname(url.pathname).toLowerCase();
-  return mime.startsWith('video/') ||
-    (mime === 'application/octet-stream' &&
-      (videoExtensions.has(urlExtension) ||
-       videoExtensions.has(dispositionExtension) ||
-       !urlExtension));
+  if (mime.startsWith('video/')) return true;
+  if (mime !== 'application/octet-stream') return false;
+  if (videoExtensions.has(urlExtension) || videoExtensions.has(dispositionExtension)) return true;
+  return !nonVideoExtensions.has(urlExtension || dispositionExtension);
 }
 
 function safeFilename(value) {
@@ -297,7 +300,6 @@ function hasVideoSignature(bytes) {
         bytes[4] === 0x8e && bytes[5] === 0x66 && bytes[6] === 0xcf && bytes[7] === 0x11) {
       return true;
     }
-    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true;
     if (bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 1 &&
         (bytes[3] === 0xba || bytes[3] === 0xb3)) return true;
   }

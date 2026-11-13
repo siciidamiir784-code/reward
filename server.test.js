@@ -49,8 +49,11 @@ test('recognizes video content types and rejects ordinary web pages', () => {
   assert.equal(isVideoResponse('video/mp4; charset=binary', new URL('https://cdn.example.org/file')), true);
   assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/file.webm')), true);
   assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/media?id=opaque')), true);
+  assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/media.bin?id=opaque')), true);
   assert.equal(mediaContentType('application/octet-stream', new URL('https://cdn.example.org/file.mp4'), {}), 'video/mp4');
   assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/file'), { 'content-disposition': 'attachment; filename="clip.webm"' }), true);
+  assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/file'), { 'content-disposition': 'attachment; filename="thumb.jpg"' }), false);
+  assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/thumb.jpg')), false);
   assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/file.txt')), false);
   assert.equal(isVideoResponse('text/html', new URL('https://cdn.example.org/file.mp4')), false);
   assert.equal(isVideoResponse('application/octet-stream', new URL('https://cdn.example.org/file.txt')), false);
@@ -60,6 +63,7 @@ test('requires a recognizable video container signature', () => {
   assert.equal(hasVideoSignature(Buffer.from('000000186674797069736f6d', 'hex')), true);
   assert.equal(hasVideoSignature(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00]),), true);
   assert.equal(hasVideoSignature(Buffer.from('<html>not a video</html>')), false);
+  assert.equal(hasVideoSignature(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])), false);
 });
 
 test('uses safe filenames from the source and handles Unicode download headers', () => {
@@ -160,7 +164,7 @@ test('resolves and downloads an authorized video from the final source URL', asy
 
 test('accepts signed opaque SaveAPI video URLs only after checking their file signature', async t => {
   const video = Buffer.from('000000186674797069736f6d00000000', 'hex');
-  const sourceUrl = new URL('https://cdn.example.org/media?id=opaque');
+  const sourceUrl = new URL('https://cdn.example.org/media.bin?id=opaque');
   const preparedDirectory = await fs.promises.mkdtemp(
     path.join(os.tmpdir(), 'clipnest-compatible-test-')
   );
@@ -229,7 +233,7 @@ test('accepts signed opaque SaveAPI video URLs only after checking their file si
 
 test('rejects opaque application/octet-stream responses without a video signature', async t => {
   const html = Buffer.from('<html>not a video</html>');
-  const sourceUrl = new URL('https://cdn.example.org/media?id=opaque');
+  const sourceUrl = new URL('https://cdn.example.org/media.bin?id=opaque');
   const requestMedia = async (_url, method) => {
     const headers = {
       'content-type': 'application/octet-stream',
