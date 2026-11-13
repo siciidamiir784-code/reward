@@ -286,14 +286,34 @@ function mediaContentType(contentType, url, headers) {
     mime || 'application/octet-stream';
 }
 
+function mediaDetailsForTransfer(contentType, url, headers, metadata) {
+  if (metadata.isMp4) {
+    return { contentType: 'video/mp4', filename: metadata.filename };
+  }
+  return {
+    contentType: mediaContentType(contentType, url, headers),
+    filename: filenameFromResponse(url, headers)
+  };
+}
+
+function isIsoBmffSignature(bytes) {
+  if (bytes.length < 12) return false;
+  const text = bytes.toString('ascii');
+  const brand = text.slice(8, 12);
+  return text.slice(4, 8) === 'ftyp' &&
+    /^(isom|iso[2-9]|mp4[12v]|avc1|M4V |M4VP|qt  |3gp[4-9]|3g2[ab]|dash|MSNV)$/.test(brand);
+}
+
+function isMp4Signature(bytes) {
+  if (!isIsoBmffSignature(bytes)) return false;
+  const brand = bytes.toString('ascii', 8, 12);
+  return /^(isom|iso[2-9]|mp4[12v]|avc1|M4V |M4VP|dash|MSNV)$/.test(brand);
+}
+
 function hasVideoSignature(bytes) {
+  if (isIsoBmffSignature(bytes)) return true;
   if (bytes.length >= 12) {
     const text = bytes.toString('ascii');
-    const brand = text.slice(8, 12);
-    if (text.slice(4, 8) === 'ftyp' &&
-        /^(isom|iso[2-9]|mp4[12v]|avc1|M4V |M4VP|qt  |3gp[4-9]|3g2[ab]|dash|MSNV)$/.test(brand)) {
-      return true;
-    }
     if (text.slice(0, 4) === 'RIFF' && text.slice(8, 12) === 'AVI ') return true;
     if (text.slice(0, 4) === 'OggS' || text.slice(0, 3) === 'FLV') return true;
     if (bytes[0] === 0x30 && bytes[1] === 0x26 && bytes[2] === 0xb2 && bytes[3] === 0x75 &&
@@ -474,16 +494,26 @@ async function probe(url, requestMedia = remoteRequest) {
   if (!hasVideoSignature(prefix)) {
     throw new RequestError(422, 'The source response is not a recognizable video file. Check the URL or use an authorized direct video link.');
   }
+  const isMp4 = isMp4Signature(prefix);
   const sampleRangeSize = (sampleHeaders['content-range'] || '').match(/\/(\d+)$/);
   if (size === null && sampleRangeSize) size = parseSize(sampleRangeSize[1]);
   if (size !== null && size > MAX_BYTES) {
     throw new RequestError(413, 'This file is larger than ClipNest’s 250 MiB limit.');
   }
 
+  const filename = filenameFromResponse(
+    sampleResponse.finalUrl || url,
+    isMp4 ? { ...sampleHeaders, 'content-type': 'video/mp4' } : sampleHeaders
+  );
   return {
-    contentType: mediaContentType(sampleType, sampleResponse.finalUrl || url, sampleHeaders),
+    contentType: isMp4 && !sampleType.toLowerCase().startsWith('video/')
+      ? 'video/mp4'
+      : mediaContentType(sampleType, sampleResponse.finalUrl || url, sampleHeaders),
     size,
-    filename: filenameFromResponse(sampleResponse.finalUrl || url, sampleHeaders)
+    filename: isMp4 && path.extname(filename).toLowerCase() !== '.mp4'
+      ? safeFilename(`${path.parse(filename).name || 'clip'}.mp4`)
+      : filename,
+    isMp4
   };
 }
 
@@ -737,7 +767,9 @@ async function handleResolve(request, response, requestMedia, rateCounts, {
     throw new RequestError(503, 'ClipNest is busy. Please try again shortly.');
   }
   const { source, metadata } = resolution;
-  const preparedMedia = ['direct-file', 'youtube'].includes(resolution.platform)
+  const canStreamProviderMp4 = ['youtube', 'tiktok'].includes(resolution.platform) &&
+    metadata.isMp4;
+  const preparedMedia = resolution.platform === 'direct-file' || canStreamProviderMp4
     ? null
     : await prepareSocialMedia(source, metadata, requestMedia);
   const token = crypto.randomBytes(24).toString('hex');
@@ -890,8 +922,12 @@ async function handleDownload(request, response, token, requestMedia, rateCounts
       throw new RequestError(502, 'The video source no longer returns a recognizable video file.');
     }
     const finalUrl = sourceResponse.finalUrl || record.source;
-    const contentType = mediaContentType(type, finalUrl, sourceResponse.headers);
-    const filename = filenameFromResponse(finalUrl, sourceResponse.headers);
+    const { contentType, filename } = mediaDetailsForTransfer(
+      type,
+      finalUrl,
+      sourceResponse.headers,
+      record.metadata
+    );
     const downloadHeaders = {
       ...securityHeaders,
       'Content-Type': contentType,
@@ -1009,10 +1045,15 @@ async function handlePreview(request, response, token, requestMedia, rateCounts)
     }
 
     const finalUrl = sourceResponse.finalUrl || record.source;
-    const filename = filenameFromResponse(finalUrl, sourceResponse.headers);
+    const { contentType, filename } = mediaDetailsForTransfer(
+      type,
+      finalUrl,
+      sourceResponse.headers,
+      record.metadata
+    );
     const previewHeaders = {
       ...securityHeaders,
-      'Content-Type': mediaContentType(type, finalUrl, sourceResponse.headers),
+      'Content-Type': contentType,
       'Content-Disposition': contentDisposition(filename).replace(/^attachment;/, 'inline;'),
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store'

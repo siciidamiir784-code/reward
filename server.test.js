@@ -207,14 +207,8 @@ test('falls back to a byte-range GET when a video source rejects HEAD', async t 
 test('accepts signed opaque SaveAPI video URLs only after checking their file signature', async t => {
   const video = Buffer.from('000000186674797069736f6d00000000', 'hex');
   const sourceUrl = new URL('https://cdn.example.org/media.bin?id=opaque');
-  const preparedDirectory = await fs.promises.mkdtemp(
-    path.join(os.tmpdir(), 'clipnest-compatible-test-')
-  );
-  const preparedPath = path.join(preparedDirectory, 'compatible.mp4');
-  await fs.promises.writeFile(preparedPath, video);
-  t.after(() => fs.promises.rm(preparedDirectory, { recursive: true, force: true }));
 
-  const requestMedia = async (_url, method, headers = {}) => {
+  const requestMedia = async (url, method, headers = {}) => {
     const responseHeaders = {
       'content-type': 'application/octet-stream',
       'content-length': String(video.length)
@@ -228,10 +222,15 @@ test('accepts signed opaque SaveAPI video URLs only after checking their file si
         headers: {
           ...responseHeaders,
           'content-range': `bytes 0-${video.length - 1}/${video.length}`
-        }
+        },
+        finalUrl: url
       });
     }
-    assert.fail('The resolver should only request a byte range to validate the media.');
+    return Object.assign(Readable.from([video]), {
+      statusCode: 200,
+      headers: responseHeaders,
+      finalUrl: url
+    });
   };
   const server = createServer({
     saveApiKey: 'server-only-test-key',
@@ -241,16 +240,7 @@ test('accepts signed opaque SaveAPI video URLs only after checking their file si
       medias: [{ type: 'video', url: sourceUrl.href }]
     }),
     requestMedia,
-    prepareMedia: async () => ({
-      directory: preparedDirectory,
-      path: preparedPath,
-      size: video.length,
-      metadata: {
-        filename: 'clip-compatible.mp4',
-        contentType: 'video/mp4',
-        size: video.length
-      }
-    })
+    prepareMedia: async () => assert.fail('A validated TikTok MP4 should not be re-encoded.')
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => {
@@ -268,9 +258,17 @@ test('accepts signed opaque SaveAPI video URLs only after checking their file si
   });
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.filename, 'clip-compatible.mp4');
+  assert.equal(result.filename, 'media.mp4');
   assert.equal(result.contentType, 'video/mp4');
-  assert.equal(result.compatible, true);
+  assert.equal(result.compatible, false);
+
+  const download = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/download/${result.token}`,
+    { headers: { Connection: 'close' } }
+  );
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get('content-disposition'), /filename="media\.mp4"/);
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), video);
 });
 
 test('rejects opaque application/octet-stream responses without a video signature', async t => {
@@ -532,9 +530,11 @@ test('rejects YouTube audio, image, and non-MP4 responses without probing them a
 test('streams video-file SaveAPI responses through download for every supported platform', async t => {
   const video = Buffer.from('000000186674797069736f6d00000000', 'hex');
   const sourceUrl = new URL('https://cdn.example.org/clip.mp4');
+  const opaqueSourceUrl = new URL('https://cdn.example.org/signed/clip?token=opaque');
   const sourceRequests = [];
   const apiRequests = [];
   const preparedDirectories = [];
+  let prepareMediaCalls = 0;
   const posts = [
     { platform: 'tiktok', url: 'https://www.tiktok.com/@creator/video/123' },
     { platform: 'facebook', url: 'https://www.facebook.com/watch/?v=123' },
@@ -552,15 +552,16 @@ test('streams video-file SaveAPI responses through download for every supported 
   ];
   const requestMedia = async (url, method, headers = {}) => {
     sourceRequests.push({ url: url.href, method, headers });
+    const isOpaqueUrl = url.href === opaqueSourceUrl.href;
     const responseHeaders = {
-      'content-type': 'video/mp4',
+      'content-type': isOpaqueUrl ? 'application/octet-stream' : 'video/mp4',
       'content-length': String(video.length)
     };
     if (method === 'HEAD') {
       return Object.assign(Readable.from([]), {
         statusCode: 200,
         headers: responseHeaders,
-        finalUrl: sourceUrl
+        finalUrl: url
       });
     }
     if (headers.Range) {
@@ -571,17 +572,17 @@ test('streams video-file SaveAPI responses through download for every supported 
       return Object.assign(Readable.from([rangeVideo]), {
         statusCode: 206,
         headers: {
-          'content-type': 'video/mp4',
+          'content-type': responseHeaders['content-type'],
           'content-length': String(rangeVideo.length),
           'content-range': `bytes ${start}-${end}/${video.length}`
         },
-        finalUrl: sourceUrl
+        finalUrl: url
       });
     }
     return Object.assign(Readable.from([video]), {
       statusCode: 200,
       headers: responseHeaders,
-      finalUrl: sourceUrl
+      finalUrl: url
     });
   };
   const server = createServer({
@@ -598,7 +599,11 @@ test('streams video-file SaveAPI responses through download for every supported 
         type: 'video',
         medias: [
           { type: 'image', ext: 'jpg', url: 'https://cdn.example.org/thumbnail.jpg' },
-          { type: 'video', ext: 'mp4', url: sourceUrl.href }
+          {
+            type: 'video',
+            ext: 'mp4',
+            url: post.platform === 'tiktok' ? opaqueSourceUrl.href : sourceUrl.href
+          }
         ],
         music: { type: 'audio', url: 'https://cdn.example.org/audio.mp3' },
         meta: { thumbnail: 'https://cdn.example.org/thumbnail.jpg' }
@@ -620,6 +625,7 @@ test('streams video-file SaveAPI responses through download for every supported 
       };
     },
     prepareMedia: async (_source, metadata) => {
+      prepareMediaCalls += 1;
       const directory = await fs.promises.mkdtemp(
         path.join(os.tmpdir(), 'clipnest-server-test-')
       );
@@ -657,10 +663,14 @@ test('streams video-file SaveAPI responses through download for every supported 
     assert.equal(response.status, 200, post.platform);
     const resolved = await response.json();
     assert.equal(resolved.contentType, 'video/mp4', post.platform);
-    if (post.platform === 'youtube') {
+    if (['youtube', 'tiktok'].includes(post.platform)) {
       assert.equal(resolved.filename, 'clip.mp4', post.platform);
       assert.equal(resolved.compatible, false, post.platform);
-      assert.equal(resolved.quality, '720p', post.platform);
+      assert.equal(
+        resolved.quality,
+        post.platform === 'youtube' ? '720p' : 'Original (as provided by the source)',
+        post.platform
+      );
     } else {
       assert.equal(resolved.filename, 'clip-compatible.mp4', post.platform);
       assert.equal(resolved.compatible, true, post.platform);
@@ -686,7 +696,9 @@ test('streams video-file SaveAPI responses through download for every supported 
     assert.equal(download.status, 200, `${post.platform} download`);
     assert.match(
       download.headers.get('content-disposition'),
-      post.platform === 'youtube' ? /filename="clip\.mp4"/ : /filename="clip-compatible\.mp4"/
+      ['youtube', 'tiktok'].includes(post.platform)
+        ? /filename="clip\.mp4"/
+        : /filename="clip-compatible\.mp4"/
     );
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), video, `${post.platform} download bytes`);
   }
@@ -698,8 +710,11 @@ test('streams video-file SaveAPI responses through download for every supported 
       ? { url: post.url, apiKey: 'server-only-test-key', quality: '720p', endpoint: 'youtube-create' }
       : { url: post.url, apiKey: 'server-only-test-key', quality: undefined, endpoint: undefined })
   );
-  assert.equal(sourceRequests.length, posts.length * 2 + 1);
-  assert.ok(sourceRequests.every(request => request.url === sourceUrl.href));
+  assert.equal(sourceRequests.length, posts.length * 2 + 3);
+  assert.equal(prepareMediaCalls, posts.length - 2);
+  assert.ok(sourceRequests.every(request =>
+    [sourceUrl.href, opaqueSourceUrl.href].includes(request.url)
+  ));
 });
 
 test('rejects a video source that changes to non-video bytes after validation', async t => {
