@@ -791,6 +791,12 @@ test('serves the domain sitemap and crawler rules', async t => {
     if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   }));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const homepage = await fetch(`${baseUrl}/`, {
+    headers: { Connection: 'close' }
+  });
+  assert.equal(homepage.status, 200);
+  assert.match(await homepage.text(), /name="google-site-verification" content="[^"]+"/);
+
   const sitemap = await fetch(`${baseUrl}/sitemap.xml`, {
     headers: { Connection: 'close' }
   });
