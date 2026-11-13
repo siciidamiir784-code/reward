@@ -220,10 +220,12 @@ function isVideoResponse(contentType, url, headers = {}) {
   const dispositionExtension = filename
     ? path.extname(filename[1].trim().replace(/^"|"$/g, '').split("'").pop()).toLowerCase()
     : '';
+  const urlExtension = path.extname(url.pathname).toLowerCase();
   return mime.startsWith('video/') ||
     (mime === 'application/octet-stream' &&
-      (videoExtensions.has(path.extname(url.pathname).toLowerCase()) ||
-       videoExtensions.has(dispositionExtension)));
+      (videoExtensions.has(urlExtension) ||
+       videoExtensions.has(dispositionExtension) ||
+       !urlExtension));
 }
 
 function safeFilename(value) {
@@ -717,7 +719,7 @@ async function handleResolve(request, response, requestMedia, rateCounts, {
     throw new RequestError(503, 'ClipNest is busy. Please try again shortly.');
   }
   const { source, metadata } = resolution;
-  const preparedMedia = resolution.platform === 'direct-file'
+  const preparedMedia = ['direct-file', 'youtube'].includes(resolution.platform)
     ? null
     : await prepareSocialMedia(source, metadata, requestMedia);
   const token = crypto.randomBytes(24).toString('hex');

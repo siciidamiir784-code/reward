@@ -46,12 +46,24 @@ test('converts source video and audio into a broadly compatible H.264/AAC MP4', 
   assert.match(inspect.stderr, /Audio: aac/);
 });
 
-test('converts a supported YouTube source before preview and device download', async t => {
+test('streams SaveAPI YouTube MP4 directly to preview and device download', async t => {
   const fixtureDirectory = await fs.promises.mkdtemp(
     path.join(os.tmpdir(), 'clipnest-compatible-fixture-')
   );
   t.after(async () => fs.promises.rm(fixtureDirectory, { recursive: true, force: true }));
-  const source = await createIncompatibleSample(fixtureDirectory);
+  const sourcePath = path.join(fixtureDirectory, 'youtube-source.mp4');
+  const generate = spawnSync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15',
+    '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=44100',
+    '-t', '0.5',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    sourcePath
+  ], { encoding: 'utf8' });
+  assert.equal(generate.status, 0, generate.stderr);
+  const source = await fs.promises.readFile(sourcePath);
   const sourceUrl = new URL('https://cdn.example.org/source.mp4');
   const responseHeaders = {
     'content-type': 'video/mp4',
@@ -66,8 +78,11 @@ test('converts a supported YouTube source before preview and device download', a
       });
     }
     if (headers.Range) {
-      const start = 0;
-      const end = Math.min(511, source.length - 1);
+      const [, startValue, endValue] = headers.Range.match(/^bytes=(\d+)-(\d*)$/);
+      const start = Number(startValue);
+      const end = endValue
+        ? Math.min(Number(endValue), source.length - 1)
+        : source.length - 1;
       return Object.assign(Readable.from([source.subarray(start, end + 1)]), {
         statusCode: 206,
         headers: {
@@ -84,21 +99,17 @@ test('converts a supported YouTube source before preview and device download', a
       finalUrl: sourceUrl
     });
   };
-  let outputDirectory;
   const server = createServer({
     requestMedia,
     saveApiKey: 'server-only-test-key',
-    prepareMedia: async (...args) => {
-      const prepared = await prepareCompatibleMedia(...args);
-      outputDirectory = prepared.directory;
-      return prepared;
-    },
+    prepareMedia: async () => assert.fail('SaveAPI already returned a compatible YouTube MP4.'),
     requestYouTubeApi: async () => ({
       success: true,
       platform: 'youtube',
       mode: 'video',
       ext: 'mp4',
       url: sourceUrl.href,
+      quality: '720p',
       expires: Math.floor(Date.now() / 1000) + 60
     })
   });
@@ -118,38 +129,22 @@ test('converts a supported YouTube source before preview and device download', a
   });
   assert.equal(resolveResponse.status, 200);
   const video = await resolveResponse.json();
-  assert.equal(video.compatible, true);
+  assert.equal(video.compatible, false);
   assert.equal(video.contentType, 'video/mp4');
-  assert.equal(video.filename, 'source-compatible.mp4');
+  assert.equal(video.filename, 'source.mp4');
+  assert.equal(video.quality, '720p');
 
-  const outputPath = path.join(outputDirectory, 'compatible.mp4');
   const preview = await fetch(`${baseUrl}/api/preview/${video.token}`, {
     headers: { Range: 'bytes=0-31', Connection: 'close' }
   });
   assert.equal(preview.status, 206);
   assert.equal(preview.headers.get('content-type'), 'video/mp4');
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), source.subarray(0, 32));
 
   const download = await fetch(`${baseUrl}/api/download/${video.token}`, {
     headers: { Connection: 'close' }
   });
   assert.equal(download.status, 200);
   const downloadedBytes = Buffer.from(await download.arrayBuffer());
-  const downloadedPath = path.join(fixtureDirectory, 'downloaded.mp4');
-  await fs.promises.writeFile(downloadedPath, downloadedBytes);
-  const inspect = spawnSync(ffmpegPath, [
-    '-hide_banner', '-i', downloadedPath, '-f', 'null', '-'
-  ], { encoding: 'utf8' });
-  assert.equal(inspect.status, 0, inspect.stderr);
-  assert.match(inspect.stderr, /Video: h264/);
-  assert.match(inspect.stderr, /Audio: aac/);
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      await fs.promises.access(outputPath);
-      await new Promise(resolve => setTimeout(resolve, 25));
-    } catch {
-      return;
-    }
-  }
-  assert.fail('The temporary compatible video was not removed after download.');
+  assert.deepEqual(downloadedBytes, source);
 });
