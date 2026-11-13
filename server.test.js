@@ -795,7 +795,33 @@ test('serves the domain sitemap and crawler rules', async t => {
     headers: { Connection: 'close' }
   });
   assert.equal(homepage.status, 200);
-  assert.match(await homepage.text(), /name="google-site-verification" content="[^"]+"/);
+  const homepageHtml = await homepage.text();
+  assert.match(homepageHtml, /name="google-site-verification" content="[^"]+"/);
+  const checkerStart = homepageHtml.indexOf('id="checker"');
+  const checkerEnd = homepageHtml.indexOf('</section>', checkerStart);
+  const nativeAd = homepageHtml.indexOf('class="wrap ad ad-native"');
+  const platformsStart = homepageHtml.indexOf('id="platforms"');
+  const platformsEnd = homepageHtml.indexOf('</section>', platformsStart);
+  const bannerAd = homepageHtml.indexOf('class="wrap ad ad-banner"');
+  const howSection = homepageHtml.indexOf('id="how"');
+  assert.ok(checkerStart >= 0 && checkerEnd < nativeAd && nativeAd < platformsStart);
+  assert.ok(platformsEnd < bannerAd && bannerAd < howSection);
+  assert.match(
+    homepageHtml,
+    /src="https:\/\/bellnewyork\.org\/21\/1c0a1e1b25c602382e768d7cf1ad859d"><\/script><div id="container-1c0a1e1b25c602382e768d7cf1ad859d"><\/div>/
+  );
+  assert.match(
+    homepageHtml,
+    /'key' : '29feb791e7d98a687eca9b394bdb2175'.*src="https:\/\/bellnewyork\.org\/22\/29feb791e7d98a687eca9b394bdb2175"/
+  );
+  assert.equal((homepageHtml.match(/<small>ADVERTISEMENT<\/small>/g) || []).length, 2);
+  assert.doesNotMatch(homepageHtml, /Ad space — connect an ad network/);
+
+  const privacy = await fetch(`${baseUrl}/privacy.html`, {
+    headers: { Connection: 'close' }
+  });
+  assert.equal(privacy.status, 200);
+  assert.match(await privacy.text(), /Native Banner and 300×250 banner ads supplied by Adsterra/);
 
   const sitemap = await fetch(`${baseUrl}/sitemap.xml`, {
     headers: { Connection: 'close' }
