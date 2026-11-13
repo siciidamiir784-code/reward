@@ -162,6 +162,48 @@ test('resolves and downloads an authorized video from the final source URL', asy
   assert.deepEqual(Buffer.from(await downloadResponse.arrayBuffer()), video);
 });
 
+test('falls back to a byte-range GET when a video source rejects HEAD', async t => {
+  const video = Buffer.from('000000186674797069736f6d00000000', 'hex');
+  const methods = [];
+  const requestMedia = async (_url, method, headers = {}) => {
+    methods.push({ method, headers });
+    if (method === 'HEAD') {
+      return Object.assign(Readable.from([]), {
+        statusCode: 403,
+        headers: { 'content-type': 'text/html' }
+      });
+    }
+    assert.deepEqual(headers, { Range: 'bytes=0-511' });
+    return Object.assign(Readable.from([video]), {
+      statusCode: 206,
+      headers: {
+        'content-type': 'video/mp4',
+        'content-length': String(video.length),
+        'content-range': `bytes 0-${video.length - 1}/${video.length}`
+      }
+    });
+  };
+  const server = createServer({ requestMedia });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => {
+    server.close(resolve);
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+  }));
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Connection: 'close' },
+    body: JSON.stringify({
+      url: 'https://cdn.example.org/clip.mp4',
+      permissionConfirmed: true
+    })
+  });
+  assert.equal(response.status, 200);
+  const resolved = await response.json();
+  assert.equal(resolved.contentType, 'video/mp4');
+  assert.deepEqual(methods.map(({ method }) => method), ['HEAD', 'GET']);
+});
+
 test('accepts signed opaque SaveAPI video URLs only after checking their file signature', async t => {
   const video = Buffer.from('000000186674797069736f6d00000000', 'hex');
   const sourceUrl = new URL('https://cdn.example.org/media.bin?id=opaque');

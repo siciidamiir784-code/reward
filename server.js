@@ -421,15 +421,31 @@ async function probe(url, requestMedia = remoteRequest) {
     headResponse = false;
   }
 
-  const status = response.statusCode || 0;
-  const type = response.headers['content-type'] || '';
-  const headers = response.headers;
-  const sizeFromRange = (response.headers['content-range'] || '').match(/\/(\d+)$/);
+  let status = response.statusCode || 0;
+  let type = response.headers['content-type'] || '';
+  let headers = response.headers;
+  let sizeFromRange = (response.headers['content-range'] || '').match(/\/(\d+)$/);
   let size = sizeFromRange
     ? parseSize(sizeFromRange[1])
     : status === 206 ? null : parseSize(response.headers['content-length']);
-  const validStatus = status === 200 || status === 206;
-  const validType = isVideoResponse(type, url, response.headers);
+  let validStatus = status === 200 || status === 206;
+  let validType = isVideoResponse(type, url, response.headers);
+
+  if (headResponse && (!validStatus || !validType)) {
+    response.on('error', () => {});
+    response.destroy();
+    response = await requestMedia(url, 'GET', { Range: 'bytes=0-511' });
+    headResponse = false;
+    status = response.statusCode || 0;
+    type = response.headers['content-type'] || '';
+    headers = response.headers;
+    sizeFromRange = (response.headers['content-range'] || '').match(/\/(\d+)$/);
+    size = sizeFromRange
+      ? parseSize(sizeFromRange[1])
+      : status === 206 ? null : parseSize(response.headers['content-length']);
+    validStatus = status === 200 || status === 206;
+    validType = isVideoResponse(type, url, response.headers);
+  }
 
   if (!validStatus || !validType) {
     response.destroy();
