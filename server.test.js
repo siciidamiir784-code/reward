@@ -783,7 +783,7 @@ test('exposes an uncached health check with security headers', async t => {
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
   assert.match(
     response.headers.get('content-security-policy'),
-    /script-src 'self' https:\/\/bellnewyork\.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' https:\/\/bellnewyork\.org; frame-src 'self' https:\/\/bellnewyork\.org/
+    /script-src 'self' https:\/\/bellnewyork\.org https:\/\/aqml\.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:\/\/bellnewyork\.org https:\/\/static\.nresystems\.com https:\/\/cdn\.storageimagedisplay\.com; media-src 'self' blob:; connect-src 'self' https:\/\/bellnewyork\.org; frame-src 'self' https:\/\/bellnewyork\.org/
   );
 });
 
@@ -825,7 +825,11 @@ test('serves the domain sitemap and crawler rules', async t => {
     headers: { Connection: 'close' }
   });
   assert.equal(privacy.status, 200);
-  assert.match(await privacy.text(), /Native Banner and 300×250 banner ads supplied by Adsterra/);
+  const privacyHtml = await privacy.text();
+  assert.match(privacyHtml, /Native Banner and 300×250 banner ads supplied by Adsterra/);
+  assert.match(privacyHtml, /aqml\.org/);
+  assert.match(privacyHtml, /cdn\.storageimagedisplay\.com/);
+  assert.match(privacyHtml, /static\.nresystems\.com/);
 
   const sitemap = await fetch(`${baseUrl}/sitemap.xml`, {
     headers: { Connection: 'close' }
