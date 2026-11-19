@@ -781,6 +781,10 @@ test('exposes an uncached health check with security headers', async t => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.match(
+    response.headers.get('content-security-policy'),
+    /script-src 'self' https:\/\/bellnewyork\.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='/
+  );
 });
 
 test('serves the domain sitemap and crawler rules', async t => {
