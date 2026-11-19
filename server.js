@@ -49,7 +49,7 @@ const securityHeaders = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://bellnewyork.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://bellnewyork.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' https://bellnewyork.org; frame-src 'self' https://bellnewyork.org; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 };
 const supportedFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],

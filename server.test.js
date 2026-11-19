@@ -783,7 +783,7 @@ test('exposes an uncached health check with security headers', async t => {
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
   assert.match(
     response.headers.get('content-security-policy'),
-    /script-src 'self' https:\/\/bellnewyork\.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='/
+    /script-src 'self' https:\/\/bellnewyork\.org 'sha256-KkFxhVf2bEkh3tZzXqX87xs761dxz3mvLvHZY3vV2mc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' https:\/\/bellnewyork\.org; frame-src 'self' https:\/\/bellnewyork\.org/
   );
 });
 
